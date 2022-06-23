@@ -81,19 +81,32 @@ class SplineSegmentationExporter(Exporter):
                 copy_image(filename, new_filename)
 
                 # Get control points to create segmentation
+                x_scaling = 1
                 if new_filename.endswith('.mhd'):
                     image_mhd = MetaImage(filename=new_filename)
                     image_size = image_mhd.get_size()
                     spacing = image_mhd.get_spacing()
+                    if spacing[0] != spacing[1]:
+                        # In this case we have to compensate for a change in width
+                        real_aspect = image_size[0] * spacing[0] / (image_size[1] * spacing[1])
+                        current_aspect = float(image_size[0]) / image_size[1]
+                        new_width = int(image_size[0] * (real_aspect / current_aspect))
+                        new_height = image_size[1]
+                        x_scaling = float(image_size[0]) / new_width
+                        print(image_size[0], new_width, image_size[1], new_height)
+                        print('The scaling in frame', frame, 'is:', x_scaling)
+                    image = np.asarray(image_mhd.get_pixel_data())
+
                 else:
                     image_pil = PIL.Image.open(new_filename)
                     image_size = image_pil.size
                     spacing = [1, 1]
-                self.save_segmentation(frame, image_size, join(subject_subfolder, target_gt_name), spacing)
+                    image = np.asarray(image_pil)
+                self.save_segmentation(frame, image_size, join(subject_subfolder, target_gt_name), spacing, x_scaling, image)
 
         return True, path
 
-    def get_object_segmentation(self, image_size, frame):
+    def get_object_segmentation(self, image_size, frame, x_scaling):
         segmentation = np.zeros(image_size, dtype=np.uint8)
         tension = 0.5
 
@@ -130,7 +143,7 @@ class SplineSegmentationExporter(Exporter):
                             (1 - tension) * (t * t * t - t * t) * (d.y - b.y)
 
                         # Round and snap to borders
-                        x = int(round(x))
+                        x = int(round(x*x_scaling))
                         x = min(image_size[1]-1, max(0, x))
                         y = int(round(y))
                         y = min(image_size[0]-1, max(0, y))
@@ -161,11 +174,14 @@ class SplineSegmentationExporter(Exporter):
 
         return segmentation
 
-    def save_segmentation(self, frame, image_size, filename, spacing):
+
+    def save_segmentation(self, frame, image_size, filename, spacing, x_scaling, image):
+        # print('x scaling is', x_scaling)
         image_size = [image_size[1], image_size[0]]
 
+
         # Create compounded segmentation object
-        segmentation = self.get_object_segmentation(image_size, frame)
+        segmentation = self.get_object_segmentation(image_size, frame, x_scaling)
 
         segmentation_mhd = MetaImage(data=segmentation)
         segmentation_mhd.set_attribute('ImageQuality', frame.image_annotation.image_quality)
